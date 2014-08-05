@@ -4,6 +4,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"fmt"
 	"github.com/armon/consul-api"
 	//"github.com/davecgh/go-spew/spew"
 	"github.com/samalba/dockerclient"
@@ -11,10 +12,23 @@ import (
 	"time"
 )
 
-var consulAddress = flag.String("consul", "0.0.0.0:8500", "Address of consul server")
-var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
-
 var docker *dockerclient.DockerClient
+
+// Define a type named "stringSlice" as a slice of strings
+type stringSlice []string
+
+// Now, for our new type, implement the two methods of
+// the flag.Value interface...
+// The first method is String() string
+func (i *stringSlice) String() string {
+	return fmt.Sprint(*i)
+}
+
+// The second method is Set(value string) error
+func (i *stringSlice) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
 
 // Callback used to listen to Docker's events
 func eventCallback(event *dockerclient.Event, args ...interface{}) {
@@ -53,18 +67,13 @@ func findContainer(name string, running bool) (*dockerclient.ContainerInfo, erro
 	return nil, errors.New("Not found")
 }
 
-func runContainer(name string, image string, tag string) (*dockerclient.ContainerInfo, error) {
+func runContainer(name string, image string, tag string, config *dockerclient.ContainerConfig) (*dockerclient.ContainerInfo, error) {
 	log.Println("Creating a container", image)
 	log.Println("Pulling container", image)
 	docker.PullImage(image, tag)
 	// We didn't find a consul container, create one
-	consulContainerConfig := &dockerclient.ContainerConfig{
-		Image: image,
-		Cmd: []string{
-			"--bootstrap-expect", "2",
-		},
-	}
-	_, err := docker.CreateContainer(consulContainerConfig, name)
+	config.Image = image
+	_, err := docker.CreateContainer(config, name)
 	if err != nil {
 		// [todo] - if error is Not found, pull down the image and try creating the container again
 		return nil, err
@@ -85,6 +94,9 @@ func main() {
 	var err error
 
 	// parse our cli flags
+	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
+	var otherConsul stringSlice
+	flag.Var(&otherConsul, "join", "Clients to join")
 	flag.Parse()
 
 	// Init the docker client
@@ -100,7 +112,13 @@ func main() {
 		if err.Error() != "Not found" {
 			log.Fatal(err)
 		}
-		consulContainer, err = runContainer("consul", "brimstone/consul", "latest")
+		// [todo] - otherConsul options need to be added, bootstrap-expect value needs to be updated
+		config := &dockerclient.ContainerConfig{
+			Cmd: []string{
+				"--bootstrap-expect", "2",
+			},
+		}
+		consulContainer, err = runContainer("consul", "brimstone/consul", "latest", config)
 	}
 	// [consider] - purge the old one, really shake the boat
 
