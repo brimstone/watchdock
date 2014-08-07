@@ -69,13 +69,20 @@ func findContainer(name string, running bool) (*dockerclient.ContainerInfo, erro
 
 func runContainer(name string, image string, tag string, config *dockerclient.ContainerConfig) (*dockerclient.ContainerInfo, error) {
 	log.Println("Creating a container", image)
-	log.Println("Pulling container", image)
-	docker.PullImage(image, tag)
 	// We didn't find a consul container, create one
 	config.Image = image
 	_, err := docker.CreateContainer(config, name)
 	if err != nil {
-		// [todo] - if error is Not found, pull down the image and try creating the container again
+		// if error is Not found, pull down the image and try creating the container again
+		if err.Error() == "Not found" {
+			log.Println("Container doesn't exist", image)
+			log.Println("Pulling container", image)
+			err = docker.PullImage(image, tag)
+			if err != nil {
+				return nil, err
+			}
+			return runContainer(name, image, tag, config)
+		}
 		return nil, err
 	}
 	consulContainer, err := findContainer("/consul", false)
@@ -119,6 +126,9 @@ func main() {
 			},
 		}
 		consulContainer, err = runContainer("consul", "brimstone/consul", "latest", config)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	// [consider] - purge the old one, really shake the boat
 
@@ -127,11 +137,17 @@ func main() {
 	if !consulContainer.State.Running {
 		// start it
 		err = docker.StartContainer(consulContainer.Id, nil)
-		if err != nil {
-			log.Fatal(err)
+		for consulContainer.NetworkSettings.IpAddress == "" {
+			log.Println("Waiting for consul container to get IP settings")
+			consulContainer, err = findContainer("/consul", false)
+			if err != nil {
+				log.Fatal(err)
+			}
+			time.Sleep(time.Second)
 		}
 	}
 	// get its IP
+	// [todo] - handle a blank ip address
 	consulConfig := consulapi.DefaultConfig()
 	consulConfig.Address = consulContainer.NetworkSettings.IpAddress + ":8500"
 	log.Println("Found consul at", consulConfig.Address)
