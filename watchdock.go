@@ -127,7 +127,7 @@ func main() {
 
 	// [todo] - otherConsul options need to be added, bootstrap-expect value needs to be updated
 	cmd := []string{
-		"--bootstrap-expect", strconv.Itoa(len(otherConsul)),
+		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
 	}
 	for _, x := range otherConsul {
 		cmd = append(cmd, "--join")
