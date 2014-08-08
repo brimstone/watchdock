@@ -9,6 +9,7 @@ import (
 	//"github.com/davecgh/go-spew/spew"
 	"github.com/samalba/dockerclient"
 	"log"
+	"strconv"
 	"time"
 )
 
@@ -28,6 +29,18 @@ func (i *stringSlice) String() string {
 func (i *stringSlice) Set(value string) error {
 	*i = append(*i, value)
 	return nil
+}
+
+func compareStringSlice(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, x := range a {
+		if b[i] != x {
+			return false
+		}
+	}
+	return true
 }
 
 // Callback used to listen to Docker's events
@@ -112,19 +125,38 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// [todo] - otherConsul options need to be added, bootstrap-expect value needs to be updated
+	cmd := []string{
+		"--bootstrap-expect", strconv.Itoa(len(otherConsul)),
+	}
+	for _, x := range otherConsul {
+		cmd = append(cmd, "--join")
+		cmd = append(cmd, x)
+	}
+
 	// Look for an existing consul container
 	log.Println("Looking for existing consul container")
 	consulContainer, err := findContainer("/consul", false)
+
+	// If we have a container, and the cmd line isn't the same, kill it and redefine err
+	if err == nil && !compareStringSlice(consulContainer.Config.Cmd, cmd) {
+		log.Println("Existing consul container was not started the way we expect.")
+		log.Println("Making it new")
+		docker.StopContainer(consulContainer.Id, 0)
+		docker.RemoveContainer(consulContainer.Id)
+		consulContainer, err = findContainer("/consul", false)
+	}
+
+	// if we didn't find  our container
 	if err != nil {
 		if err.Error() != "Not found" {
 			log.Fatal(err)
 		}
-		// [todo] - otherConsul options need to be added, bootstrap-expect value needs to be updated
+		// figure out its cmd line
 		config := &dockerclient.ContainerConfig{
-			Cmd: []string{
-				"--bootstrap-expect", "2",
-			},
+			Cmd: cmd,
 		}
+		// start our container
 		consulContainer, err = runContainer("consul", "brimstone/consul", "latest", config)
 		if err != nil {
 			log.Fatal(err)
