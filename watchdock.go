@@ -13,7 +13,12 @@ import (
 	"time"
 )
 
+// Define our global variables
 var docker *dockerclient.DockerClient
+
+var otherConsul stringSlice
+var consul *consulapi.Client
+var consulContainer *dockerclient.ContainerInfo
 
 // Define a type named "stringSlice" as a slice of strings
 type stringSlice []string
@@ -109,23 +114,8 @@ func runContainer(name string, image string, tag string, config *dockerclient.Co
 	return consulContainer, nil
 }
 
-func main() {
-	// Function level variables
-	var err error
-
-	// parse our cli flags
-	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
-	var otherConsul stringSlice
-	flag.Var(&otherConsul, "join", "Clients to join")
-	flag.Parse()
-
-	// Init the docker client
-	docker, err = dockerclient.NewDockerClient(*dockerSock, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// [todo] - otherConsul options need to be added, bootstrap-expect value needs to be updated
+func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
+	// Build our consul cmd line from our options
 	cmd := []string{
 		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
 	}
@@ -186,6 +176,25 @@ func main() {
 
 	// Establish our client
 	consul, _ := consulapi.NewClient(consulConfig)
+	return consulContainer, consul
+}
+
+func main() {
+	// Function level variables
+	var err error
+
+	// parse our cli flags
+	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
+	flag.Var(&otherConsul, "join", "Clients to join")
+	flag.Parse()
+
+	// Init the docker client
+	docker, err = dockerclient.NewDockerClient(*dockerSock, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	consulContainer, consul = findConsul()
 	consulStatus := consul.Status()
 
 	// Find our leader so the user knows we've connected right
@@ -196,7 +205,6 @@ func main() {
 		leader, err = consulStatus.Leader()
 	}
 	for leader == "" && err == nil {
-
 		log.Println("No leader and no error, waiting for a valid leader")
 		leader, err = consulStatus.Leader()
 		time.Sleep(2 * time.Second)
@@ -204,11 +212,12 @@ func main() {
 	// let the users know we found the leader
 	log.Println("Consul leader is", leader)
 
-	/*
-		log.Println("Finished enumerating containers, starting watch for docker events.")
-		// Listen to events
-		docker.StartMonitorEvents(eventCallback)
-		// Periodically check on our services, forever
-		time.Sleep(2 * time.Hour)
-	*/
+	log.Println("Finished enumerating containers, starting watch for docker events.")
+	// Listen to events
+	docker.StartMonitorEvents(eventCallback)
+	// Periodically check on our services, forever
+	for {
+		time.Sleep(2 * time.Second)
+		consulContainer, consul = findConsul()
+	}
 }
