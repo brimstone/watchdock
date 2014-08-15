@@ -55,9 +55,12 @@ type Container struct {
 	Image        string
 	MaxInstances int
 	Pty          bool
-	Volumes      []string
+	BindTo       string
+	Cmd          []string
 	Ports        []string
 	Hosts        []string
+	Volumes      []string
+	VolumesFrom  []string
 	Where        []string
 }
 
@@ -130,6 +133,7 @@ func runContainer(name string, image string, tag string, config *dockerclient.Co
 }
 
 func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
+	var consulContainer Container
 	// Build our consul cmd line from our options
 	cmd := []string{
 		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
@@ -139,30 +143,53 @@ func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
 		cmd = append(cmd, x)
 	}
 
-	// Look for an existing consul container
-	log.Println("Looking for existing consul container")
-	consulContainer, err := findContainer("/consul", false)
-
-	// If we have a container, and the cmd line isn't the same, kill it and redefine err
-	if err == nil && !compareStringSlice(consulContainer.Config.Cmd, cmd) {
-		log.Println("Existing consul container was not started the way we expect.")
-		log.Println("Making it new")
-		docker.StopContainer(consulContainer.Id, 0)
-		docker.RemoveContainer(consulContainer.Id)
-		consulContainer, err = findContainer("/consul", false)
+	consulContainer.Cmd = cmd
+	consulContainer.Name = "consul"
+	consulContainer.Image = "brimstone/consul"
+	consulContainer.Ports = []string{"8500:8500"}
+	consulInstance, err := startInstance(consulContainer)
+	if err != nil {
+		log.Fatal(err)
 	}
 
-	// if we didn't find  our container
+	// get its IP
+	// [todo] - handle a blank ip address
+	consulConfig := consulapi.DefaultConfig()
+	consulConfig.Address = consulInstance.NetworkSettings.IpAddress + ":8500"
+	log.Println("Found consul at", consulConfig.Address)
+
+	// Establish our client
+	consul, _ := consulapi.NewClient(consulConfig)
+	return consulInstance, consul
+}
+
+func startInstance(container Container) (*dockerclient.ContainerInfo, error) {
+	// Look for an existing consul container
+	log.Println("Looking for existing " + container.Name + " container")
+	instance, err := findContainer("/"+container.Name, false)
+
+	// If we have a container, and the cmd line isn't the same, kill it and redefine err
+	if err == nil && !compareStringSlice(instance.Config.Cmd, container.Cmd) {
+		log.Println("Existing " + container.Name + " container was not started the way we expect.")
+		log.Println("Making it new")
+		docker.StopContainer(instance.Id, 0)
+		docker.RemoveContainer(instance.Id)
+		instance, err = findContainer("/"+container.Name, false)
+	}
+
+	// if we didn't find our container
 	if err != nil {
 		if err.Error() != "Not found" {
-			log.Fatal(err)
+			log.Printf("Error: %s\n", err.Error())
+			return nil, err
 		}
 		// figure out its cmd line
 		config := &dockerclient.ContainerConfig{
-			Cmd: cmd,
+			Cmd: container.Cmd,
 		}
 		// start our container
-		consulContainer, err = runContainer("consul", "brimstone/consul", "latest", config)
+		// [todo] - need to support tags at some point, split on the :
+		instance, err = runContainer(container.Name, container.Image, "latest", config)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -171,27 +198,19 @@ func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
 
 	// Now we have a container
 	// If it's not running
-	if !consulContainer.State.Running {
+	if !instance.State.Running {
 		// start it
-		err = docker.StartContainer(consulContainer.Id, nil)
-		for consulContainer.NetworkSettings.IpAddress == "" {
-			log.Println("Waiting for consul container to get IP settings")
-			consulContainer, err = findContainer("/consul", false)
+		err = docker.StartContainer(instance.Id, nil)
+		for instance.NetworkSettings.IpAddress == "" {
+			log.Println("Waiting for " + container.Name + " container to get IP settings")
+			instance, err = findContainer("/"+container.Name, false)
 			if err != nil {
 				log.Fatal(err)
 			}
 			time.Sleep(time.Second)
 		}
 	}
-	// get its IP
-	// [todo] - handle a blank ip address
-	consulConfig := consulapi.DefaultConfig()
-	consulConfig.Address = consulContainer.NetworkSettings.IpAddress + ":8500"
-	log.Println("Found consul at", consulConfig.Address)
-
-	// Establish our client
-	consul, _ := consulapi.NewClient(consulConfig)
-	return consulContainer, consul
+	return instance, nil
 }
 
 func mapKVPairs() *map[string]Container {
@@ -210,6 +229,7 @@ func mapKVPairs() *map[string]Container {
 		}
 		// extract our container, there's probably a better way
 		container, _ := containers[levels[1]]
+		container.Name = levels[1]
 		// convert our KV value to a real string
 		value := string(pairs[i].Value)
 		// big switch that unmarshalls the KV into a Container
@@ -234,6 +254,23 @@ func mapKVPairs() *map[string]Container {
 	}
 	// return it to our calling function
 	return &containers
+}
+
+func pullContainers(containers map[string]Container) {
+	for _, container := range containers {
+		log.Printf("Pulling %s\n", container.Image)
+		err := docker.PullImage(container.Image, "latest")
+		if err != nil {
+			log.Printf("Error while pulling %s: %s\n", container.Image, err.Error())
+		}
+	}
+}
+
+func startContainers(containers map[string]Container) {
+	for name, container := range containers {
+		log.Printf("Checking status of %s\n", name)
+		startInstance(container)
+	}
 }
 
 func main() {
@@ -291,8 +328,15 @@ func main() {
 	docker.StartMonitorEvents(dockerCallback)
 	// Periodically check on our services, forever
 	for {
+		// Gather up all of the containers we should now about
 		containers = *mapKVPairs()
-		time.Sleep(5 * time.Second)
+		// pull down all of the images
+		pullContainers(containers)
+		// start what's not running
+		startContainers(containers)
+		// sleep for a bit
+		time.Sleep(30 * time.Second)
+		// make sure our consul container is running
 		consulContainer, consul = findConsul()
 	}
 }
