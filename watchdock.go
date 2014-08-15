@@ -248,6 +248,8 @@ func mapKVPairs() *map[string]Container {
 			container.MaxInstances, _ = strconv.Atoi(value)
 		case "volumes":
 			container.Volumes = strings.Split(value, ",")
+		case "volumesfrom":
+			container.VolumesFrom = strings.Split(value, ",")
 		case "where":
 			container.Where = strings.Split(value, ",")
 		case "pty":
@@ -334,9 +336,10 @@ func main() {
 	for {
 		// Gather up all of the containers we should now about
 		containers = *mapKVPairs()
-		// append ourself to the containers array
+
 		// pull down all of the images
 		pullContainers(containers)
+
 		// start what's not running
 		startContainers(containers)
 		// [todo] - clean up dead containers
