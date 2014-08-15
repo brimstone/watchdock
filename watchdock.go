@@ -104,7 +104,7 @@ func findContainer(name string, running bool) (*dockerclient.ContainerInfo, erro
 }
 
 func runContainer(name string, image string, tag string, config *dockerclient.ContainerConfig) (*dockerclient.ContainerInfo, error) {
-	log.Println("Creating a container", image)
+	log.Println("Creating a container from", image)
 	// We didn't find a consul container, create one
 	config.Image = image
 	_, err := docker.CreateContainer(config, name)
@@ -133,6 +133,7 @@ func runContainer(name string, image string, tag string, config *dockerclient.Co
 }
 
 func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
+	// Here's where we define our consul container
 	var consulContainer Container
 	// Build our consul cmd line from our options
 	cmd := []string{
@@ -142,7 +143,6 @@ func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
 		cmd = append(cmd, "--join")
 		cmd = append(cmd, x)
 	}
-
 	consulContainer.Cmd = cmd
 	consulContainer.Name = "consul"
 	consulContainer.Image = "brimstone/consul"
@@ -185,13 +185,17 @@ func startInstance(container Container) (*dockerclient.ContainerInfo, error) {
 		}
 		// figure out its cmd line
 		config := &dockerclient.ContainerConfig{
-			Cmd: container.Cmd,
+			Hostname: container.Hostname,
+			Cmd:      container.Cmd,
+			Tty:      container.Pty,
+			// [todo] - Need to rethink this part
+			//ExposedPorts: container.Ports,
 		}
 		// start our container
 		// [todo] - need to support tags at some point, split on the :
 		instance, err = runContainer(container.Name, container.Image, "latest", config)
 		if err != nil {
-			log.Fatal(err)
+			return nil, err
 		}
 	}
 	// [consider] - purge the old one, really shake the boat
@@ -205,7 +209,7 @@ func startInstance(container Container) (*dockerclient.ContainerInfo, error) {
 			log.Println("Waiting for " + container.Name + " container to get IP settings")
 			instance, err = findContainer("/"+container.Name, false)
 			if err != nil {
-				log.Fatal(err)
+				return nil, err
 			}
 			time.Sleep(time.Second)
 		}
@@ -330,10 +334,13 @@ func main() {
 	for {
 		// Gather up all of the containers we should now about
 		containers = *mapKVPairs()
+		// append ourself to the containers array
 		// pull down all of the images
 		pullContainers(containers)
 		// start what's not running
 		startContainers(containers)
+		// [todo] - clean up dead containers
+		// [todo] - clean up untagged images
 		// sleep for a bit
 		time.Sleep(30 * time.Second)
 		// make sure our consul container is running
