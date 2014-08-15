@@ -10,6 +10,7 @@ import (
 	"github.com/samalba/dockerclient"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -48,8 +49,23 @@ func compareStringSlice(a []string, b []string) bool {
 	return true
 }
 
+type Container struct {
+	Name         string
+	Hostname     string
+	Image        string
+	MaxInstances int
+	Pty          bool
+	Volumes      []string
+	Ports        []string
+	Hosts        []string
+	Where        []string
+}
+
+var containers map[string]Container
+
 // Callback used to listen to Docker's events
-func eventCallback(event *dockerclient.Event, args ...interface{}) {
+func dockerCallback(event *dockerclient.Event, args ...interface{}) {
+	log.Println("Detected docker", event.Status, "event")
 	switch event.Status {
 	/*case "create":
 	case "start":
@@ -58,14 +74,13 @@ func eventCallback(event *dockerclient.Event, args ...interface{}) {
 		if err != nil {
 			log.Println("err:", err)
 		}
+	*/
 	case "die":
-		err := removeContainer(event.Id)
-		if err != nil {
-			log.Println("err:", err)
+		if event.Id == consulContainer.Id {
+			consulContainer, consul = findConsul()
 		}
 	case "destroy":
 	case "delete":
-	*/
 	default:
 		log.Printf("Received event: %#v\n", *event)
 	}
@@ -179,6 +194,48 @@ func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
 	return consulContainer, consul
 }
 
+func mapKVPairs() *map[string]Container {
+	kv := consul.KV()
+
+	pairs, _, _ := kv.List("containers", nil)
+
+	containers := make(map[string]Container)
+	// This will basically loop through every container item under in our pair
+	for i := len(pairs) - 1; i >= 0; i-- {
+		// Figure out how many levels are in our key
+		levels := strings.Split(pairs[i].Key, "/")
+		// we don't care about the top level keys
+		if len(levels) < 3 || levels[2] == "" {
+			continue
+		}
+		// extract our container, there's probably a better way
+		container, _ := containers[levels[1]]
+		// convert our KV value to a real string
+		value := string(pairs[i].Value)
+		// big switch that unmarshalls the KV into a Container
+		switch levels[2] {
+		case "image":
+			container.Image = value
+		case "ports":
+			container.Ports = strings.Split(value, ",")
+		case "hostname":
+			container.Hostname = value
+		case "maxinstances":
+			container.MaxInstances, _ = strconv.Atoi(value)
+		case "volumes":
+			container.Volumes = strings.Split(value, ",")
+		case "where":
+			container.Where = strings.Split(value, ",")
+		case "pty":
+			container.Pty = value == "true"
+		}
+		// finally set the container back
+		containers[levels[1]] = container
+	}
+	// return it to our calling function
+	return &containers
+}
+
 func main() {
 	// Function level variables
 	var err error
@@ -194,30 +251,48 @@ func main() {
 		log.Fatal(err)
 	}
 
-	consulContainer, consul = findConsul()
-	consulStatus := consul.Status()
+	leader := ""
+	// While we don't have a leader
+	for leader == "" {
+		log.Println("Looking for consul leader")
+		consulContainer, consul = findConsul()
+		consulStatus := consul.Status()
 
-	// Find our leader so the user knows we've connected right
-	leader, err := consulStatus.Leader()
-	for err != nil {
-		log.Println("Warning: ", err)
-		time.Sleep(time.Second)
+		// Find our leader so the user knows we've connected right
 		leader, err = consulStatus.Leader()
+		log.Println("leader is", leader)
+		// If we have an error getting the leader, wait a second, then try again
+		for err != nil {
+			log.Println("Warning: ", err)
+			time.Sleep(time.Second)
+			leader, err = consulStatus.Leader()
+		}
+		// Remember when we started waiting for leader election to happen
+		startTime := time.Now()
+		// break if we get leader, an error, or it times out
+		for leader == "" && err == nil && time.Since(startTime) < time.Minute {
+			log.Println("No leader and no error, waiting for a valid leader")
+			leader, err = consulStatus.Leader()
+			time.Sleep(2 * time.Second)
+		}
+		// If we still don't have a leader, than we timed out
+		if leader == "" {
+			log.Println("Timeout while waiting on leader election, killing the container")
+			docker.StopContainer(consulContainer.Id, 0)
+			docker.RemoveContainer(consulContainer.Id)
+		}
 	}
-	for leader == "" && err == nil {
-		log.Println("No leader and no error, waiting for a valid leader")
-		leader, err = consulStatus.Leader()
-		time.Sleep(2 * time.Second)
-	}
+
 	// let the users know we found the leader
 	log.Println("Consul leader is", leader)
 
 	log.Println("Finished enumerating containers, starting watch for docker events.")
 	// Listen to events
-	docker.StartMonitorEvents(eventCallback)
+	docker.StartMonitorEvents(dockerCallback)
 	// Periodically check on our services, forever
 	for {
-		time.Sleep(2 * time.Second)
+		containers = *mapKVPairs()
+		time.Sleep(5 * time.Second)
 		consulContainer, consul = findConsul()
 	}
 }
