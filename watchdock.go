@@ -17,9 +17,9 @@ import (
 // Define our global variables
 var docker *dockerclient.DockerClient
 
-var otherConsul stringSlice
 var consul *consulapi.Client
-var consulContainer *dockerclient.ContainerInfo
+var consulInstance *dockerclient.ContainerInfo
+var consulContainer Container
 
 // Define a type named "stringSlice" as a slice of strings
 type stringSlice []string
@@ -79,8 +79,8 @@ func dockerCallback(event *dockerclient.Event, args ...interface{}) {
 		}
 	*/
 	case "die":
-		if event.Id == consulContainer.Id {
-			consulContainer, consul = findConsul()
+		if event.Id == consulInstance.Id {
+			consulInstance, consul = findConsul(consulContainer)
 		}
 	case "destroy":
 	case "delete":
@@ -132,26 +132,12 @@ func runContainer(name string, image string, tag string, config *dockerclient.Co
 	return consulContainer, nil
 }
 
-func findConsul() (*dockerclient.ContainerInfo, *consulapi.Client) {
-	// Here's where we define our consul container
-	var consulContainer Container
-	// Build our consul cmd line from our options
-	cmd := []string{
-		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
-	}
-	for _, x := range otherConsul {
-		cmd = append(cmd, "--join")
-		cmd = append(cmd, x)
-	}
-	consulContainer.Cmd = cmd
-	consulContainer.Name = "consul"
-	consulContainer.Image = "brimstone/consul"
-	consulContainer.Ports = []string{"8500:8500"}
+func findConsul(consulContainer Container) (*dockerclient.ContainerInfo, *consulapi.Client) {
+	// Find our container
 	consulInstance, err := startInstance(consulContainer)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	// get its IP
 	// [todo] - handle a blank ip address
 	consulConfig := consulapi.DefaultConfig()
@@ -282,6 +268,7 @@ func startContainers(containers map[string]Container) {
 func main() {
 	// Function level variables
 	var err error
+	var otherConsul stringSlice
 
 	// parse our cli flags
 	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
@@ -294,11 +281,25 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// Here's where we define our consul container
+	// Build our consul cmd line from our options
+	cmd := []string{
+		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
+	}
+	for _, x := range otherConsul {
+		cmd = append(cmd, "--join")
+		cmd = append(cmd, x)
+	}
+	consulContainer.Cmd = cmd
+	consulContainer.Name = "consul"
+	consulContainer.Image = "brimstone/consul"
+	consulContainer.Ports = []string{"8500:8500"}
+
 	leader := ""
 	// While we don't have a leader
 	for leader == "" {
 		log.Println("Looking for consul leader")
-		consulContainer, consul = findConsul()
+		consulInstance, consul = findConsul(consulContainer)
 		consulStatus := consul.Status()
 
 		// Find our leader so the user knows we've connected right
@@ -321,8 +322,8 @@ func main() {
 		// If we still don't have a leader, than we timed out
 		if leader == "" {
 			log.Println("Timeout while waiting on leader election, killing the container")
-			docker.StopContainer(consulContainer.Id, 0)
-			docker.RemoveContainer(consulContainer.Id)
+			docker.StopContainer(consulInstance.Id, 0)
+			docker.RemoveContainer(consulInstance.Id)
 		}
 	}
 
@@ -347,6 +348,6 @@ func main() {
 		// sleep for a bit
 		time.Sleep(30 * time.Second)
 		// make sure our consul container is running
-		consulContainer, consul = findConsul()
+		consulInstance, consul = findConsul(consulContainer)
 	}
 }
