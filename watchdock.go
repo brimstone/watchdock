@@ -90,14 +90,14 @@ func dockerCallback(event *dockerclient.Event, args ...interface{}) {
 	}
 }
 
-func findContainer(name string, running bool) (*dockerclient.ContainerInfo, error) {
+func findContainerByName(name string, running bool) (*dockerclient.ContainerInfo, error) {
 	runningContainers, err := docker.ListContainers(!running)
 	if err != nil {
 		log.Fatal(err)
 	}
 	for _, c := range runningContainers {
 		// If we find one
-		if c.Names[0] == "/consul" {
+		if c.Names[0] == "/"+name {
 			return docker.InspectContainer(c.Id)
 		}
 	}
@@ -122,7 +122,7 @@ func runContainer(name string, image string, tag string, config *dockerclient.Co
 		}
 		return nil, err
 	}
-	consulContainer, err := findContainer("/consul", false)
+	consulContainer, err := findContainerByName("consul", false)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func findConsul(consulContainer Container) (*dockerclient.ContainerInfo, *consul
 func startInstance(container Container) (*dockerclient.ContainerInfo, error) {
 	// Look for an existing consul container
 	log.Println("Looking for existing " + container.Name + " container")
-	instance, err := findContainer("/"+container.Name, false)
+	instance, err := findContainerByName(container.Name, false)
 
 	// If we have a container, and the cmd line isn't the same, kill it and redefine err
 	if err == nil && !compareStringSlice(instance.Config.Cmd, container.Cmd) {
@@ -161,7 +161,7 @@ func startInstance(container Container) (*dockerclient.ContainerInfo, error) {
 		log.Println("Making it new")
 		docker.StopContainer(instance.Id, 0)
 		docker.RemoveContainer(instance.Id)
-		instance, err = findContainer("/"+container.Name, false)
+		instance, err = findContainerByName(container.Name, false)
 	}
 
 	// if we didn't find our container
@@ -194,7 +194,7 @@ func startInstance(container Container) (*dockerclient.ContainerInfo, error) {
 		err = docker.StartContainer(instance.Id, nil)
 		for instance.NetworkSettings.IpAddress == "" {
 			log.Println("Waiting for " + container.Name + " container to get IP settings")
-			instance, err = findContainer("/"+container.Name, false)
+			instance, err = findContainerByName(container.Name, false)
 			if err != nil {
 				return nil, err
 			}
