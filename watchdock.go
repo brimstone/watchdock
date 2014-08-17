@@ -84,6 +84,7 @@ func dockerCallback(event *dockerclient.Event, args ...interface{}) {
 		}
 	case "destroy":
 	case "delete":
+	// [todo] - Make and call findContainerById(event.Id)
 	default:
 		log.Printf("Received event: %#v\n", *event)
 	}
