@@ -270,6 +270,27 @@ func startContainers(containers map[string]Container) {
 	}
 }
 
+func cleanUntaggedContainers() {
+	runningContainers, err := docker.ListContainers(false)
+	if err != nil {
+		log.Fatal(err)
+	}
+	images, err := docker.ListImages()
+	for _, c := range runningContainers {
+		instance, _ := docker.InspectContainer(c.Id)
+		for _, image := range images {
+			if image.Id != instance.Image {
+				continue
+			}
+			if image.RepoTags[0] == "<none>:<none>" {
+				log.Printf("Cleaning up old container %s\n", instance.Id)
+				docker.StopContainer(instance.Id, 0)
+				docker.RemoveContainer(instance.Id)
+			}
+		}
+	}
+}
+
 func main() {
 	// Function level variables
 	var err error
@@ -351,6 +372,7 @@ func main() {
 		// start what's not running
 		startContainers(containers)
 		// [todo] - clean up dead containers
+		cleanUntaggedContainers()
 		// [todo] - clean up untagged images
 		// sleep for a bit
 		time.Sleep(30 * time.Second)
