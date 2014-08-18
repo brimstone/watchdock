@@ -249,13 +249,17 @@ func mapKVPairs() *map[string]Container {
 	return &containers
 }
 
+func pullContainer(container Container) {
+	log.Printf("Pulling %s\n", container.Image)
+	err := docker.PullImage(container.Image, "latest")
+	if err != nil {
+		log.Printf("Error while pulling %s: %s\n", container.Image, err.Error())
+	}
+}
+
 func pullContainers(containers map[string]Container) {
 	for _, container := range containers {
-		log.Printf("Pulling %s\n", container.Image)
-		err := docker.PullImage(container.Image, "latest")
-		if err != nil {
-			log.Printf("Error while pulling %s: %s\n", container.Image, err.Error())
-		}
+		pullContainer(container)
 	}
 }
 
@@ -341,6 +345,8 @@ func main() {
 
 		// pull down all of the images
 		pullContainers(containers)
+		pullContainer(consulContainer)
+		pullContainer(Container{Image: "brimstone/watchdock"})
 
 		// start what's not running
 		startContainers(containers)
