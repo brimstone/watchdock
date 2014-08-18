@@ -292,12 +292,13 @@ func cleanUntaggedContainers() {
 }
 
 func cleanImages() {
-images :=docker.ListImages()
-for _, images := range(images) {
-if images.RepoTags[0] == "<none>:<none>" {
-docker.RemoveImage(image.Id)
-}
-}
+	images, _ := docker.ListImages()
+	for _, image := range images {
+		if image.RepoTags[0] == "<none>:<none>" {
+			log.Printf("Removing untagged image %s\n", image.Id)
+			docker.RemoveImage(image.Id)
+		}
+	}
 }
 
 func main() {
