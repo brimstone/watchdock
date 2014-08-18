@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"github.com/armon/consul-api"
 	//"github.com/davecgh/go-spew/spew"
-	"github.com/samalba/dockerclient"
+	"github.com/brimstone/dockerclient"
 	"log"
 	"strconv"
 	"strings"
@@ -271,7 +271,7 @@ func startContainers(containers map[string]Container) {
 }
 
 func cleanUntaggedContainers() {
-	runningContainers, err := docker.ListContainers(false)
+	runningContainers, err := docker.ListContainers(true)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -379,10 +379,12 @@ func main() {
 		pullContainer(consulContainer)
 		pullContainer(Container{Image: "brimstone/watchdock"})
 
+		// clean up dead containers
+		cleanUntaggedContainers()
+		// clean up untagged images
+		cleanImages()
 		// start what's not running
 		startContainers(containers)
-		// [todo] - clean up dead containers
-		cleanUntaggedContainers()
 		// [todo] - clean up untagged images
 		// sleep for a bit
 		time.Sleep(30 * time.Second)
