@@ -387,7 +387,7 @@ func main() {
 		startContainers(containers)
 		// [todo] - clean up untagged images
 		// sleep for a bit
-		time.Sleep(30 * time.Second)
+		time.Sleep(2 * time.Minute)
 		// make sure our consul container is running
 		consulInstance, consul = findConsul(consulContainer)
 	}
