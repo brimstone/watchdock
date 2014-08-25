@@ -57,9 +57,10 @@ type Container struct {
 	Pty          bool
 	BindTo       string
 	Cmd          []string
-	Ports        []string
+	Env          []string
+	Ports        map[string][]dockerclient.PortBinding
 	Hosts        []string
-	Volumes      []string
+	Volumes      map[string]struct{}
 	VolumesFrom  []string
 	Where        []string
 }
@@ -104,11 +105,11 @@ func findContainerByName(name string, running bool) (*dockerclient.ContainerInfo
 	return nil, errors.New("Not found")
 }
 
-func runContainer(name string, image string, tag string, config *dockerclient.ContainerConfig) (*dockerclient.ContainerInfo, error) {
+func runContainer(name string, image string, tag string, createConfig *dockerclient.ContainerConfig, hostConfig *dockerclient.HostConfig) (*dockerclient.ContainerInfo, error) {
 	log.Println("Creating a container from", image)
 	// We didn't find a consul container, create one
-	config.Image = image
-	_, err := docker.CreateContainer(config, name)
+	createConfig.Image = image
+	_, err := docker.CreateContainer(createConfig, name)
 	if err != nil {
 		// if error is Not found, pull down the image and try creating the container again
 		if err.Error() == "Not found" {
@@ -118,7 +119,7 @@ func runContainer(name string, image string, tag string, config *dockerclient.Co
 			if err != nil {
 				return nil, err
 			}
-			return runContainer(name, image, tag, config)
+			return runContainer(name, image, tag, createConfig, hostConfig)
 		}
 		return nil, err
 	}
@@ -126,7 +127,7 @@ func runContainer(name string, image string, tag string, config *dockerclient.Co
 	if err != nil {
 		return nil, err
 	}
-	err = docker.StartContainer(consulContainer.Id, nil)
+	err = docker.StartContainer(consulContainer.Id, hostConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -171,16 +172,17 @@ func startInstance(container Container) (*dockerclient.ContainerInfo, error) {
 			return nil, err
 		}
 		// figure out its cmd line
-		config := &dockerclient.ContainerConfig{
+		createConfig := &dockerclient.ContainerConfig{
 			Hostname: container.Hostname,
 			Cmd:      container.Cmd,
 			Tty:      container.Pty,
-			// [todo] - Need to rethink this part
-			//ExposedPorts: container.Ports,
+		}
+		hostConfig := &dockerclient.HostConfig{
+			PortBindings: container.Ports,
 		}
 		// start our container
 		// [todo] - need to support tags at some point, split on the :
-		instance, err = runContainer(container.Name, container.Image, "latest", config)
+		instance, err = runContainer(container.Name, container.Image, "latest", createConfig, hostConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -227,14 +229,14 @@ func mapKVPairs() *map[string]Container {
 		switch levels[2] {
 		case "image":
 			container.Image = value
-		case "ports":
-			container.Ports = strings.Split(value, ",")
+			//case "ports":
+			//container.Ports = strings.Split(value, ",")
 		case "hostname":
 			container.Hostname = value
 		case "maxinstances":
 			container.MaxInstances, _ = strconv.Atoi(value)
-		case "volumes":
-			container.Volumes = strings.Split(value, ",")
+		//case "volumes":
+		//container.Volumes = strings.Split(value, ",")
 		case "volumesfrom":
 			container.VolumesFrom = strings.Split(value, ",")
 		case "where":
@@ -329,7 +331,16 @@ func main() {
 	consulContainer.Cmd = cmd
 	consulContainer.Name = "consul"
 	consulContainer.Image = "brimstone/consul"
-	consulContainer.Ports = []string{"8500:8500"}
+	consulContainer.Ports = map[string][]dockerclient.PortBinding{
+		"8500/tcp": []dockerclient.PortBinding{
+			dockerclient.PortBinding{
+				HostIp:   "0.0.0.0",
+				HostPort: "8500",
+			},
+		},
+	}
+	consulContainer.Volumes = make(map[string]struct{})
+	consulContainer.Env = make([]string, 0)
 
 	leader := ""
 	// While we don't have a leader
