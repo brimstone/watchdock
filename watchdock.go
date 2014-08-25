@@ -332,6 +332,12 @@ func main() {
 			HostPort: "8500",
 		},
 	}
+	consulContainer.Ports["8300/tcp"] = []dockerclient.PortBinding{
+		dockerclient.PortBinding{
+			HostIp:   "0.0.0.0",
+			HostPort: "8300",
+		},
+	}
 	consulContainer.Volumes = make(map[string]struct{})
 	consulContainer.Env = make([]string, 0)
 
