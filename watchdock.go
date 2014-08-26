@@ -358,13 +358,14 @@ func main() {
 		leader, err = consulStatus.Leader()
 		log.Println("leader is", leader)
 		// If we have an error getting the leader, wait a second, then try again
-		for err != nil {
+		startTime := time.Now()
+		for err != nil && time.Since(startTime) < time.Minute {
 			log.Println("Warning: ", err)
 			time.Sleep(time.Second)
 			leader, err = consulStatus.Leader()
 		}
 		// Remember when we started waiting for leader election to happen
-		startTime := time.Now()
+		startTime = time.Now()
 		// break if we get leader, an error, or it times out
 		for leader == "" && err == nil && time.Since(startTime) < time.Minute {
 			log.Println("No leader and no error, waiting for a valid leader")
