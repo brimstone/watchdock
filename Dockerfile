@@ -1,6 +1,7 @@
-FROM brimstone/ubuntu:14.04
+FROM ubuntu:14.04
 
 MAINTAINER brimstone@the.narro.ws
+CMD []
 
 # TORUN -v /var/run/docker.sock:/var/run/docker.sock
 
@@ -8,7 +9,6 @@ ENV GOPATH /go
 
 # Set our command
 ENTRYPOINT ["/usr/local/bin/watchdock"]
-CMD []
 
 # Install the packages we need, clean up after them and us
 RUN apt-get update \
