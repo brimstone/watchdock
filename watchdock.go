@@ -106,23 +106,27 @@ func runContainer(name string, image string, tag string, createConfig *dockercli
 	_, err := docker.CreateContainer(dockerclient.CreateContainerOptions{Name: name, Config: createConfig})
 	if err != nil {
 		// if error is Not found, pull down the image and try creating the container again
-		if err.Error() == "Not found" {
+		if err.Error() == "no such image" {
 			log.Println("Container doesn't exist", image)
 			log.Println("Pulling container", image)
 			err = docker.PullImage(dockerclient.PullImageOptions{Repository: image, Tag: tag}, dockerclient.AuthConfiguration{})
 			if err != nil {
+				log.Printf("Error: runContainer 1: %s\n", err.Error())
 				return nil, err
 			}
 			return runContainer(name, image, tag, createConfig, hostConfig)
 		}
+		log.Printf("Error: runContainer 2: %s\n", err.Error())
 		return nil, err
 	}
 	consulContainer, err := findContainerByName("consul", false)
 	if err != nil {
+		log.Printf("Error: runContainer 3: %s\n", err.Error())
 		return nil, err
 	}
 	err = docker.StartContainer(consulContainer.ID, hostConfig)
 	if err != nil {
+		log.Printf("Error: runContainer 4: %s\n", err.Error())
 		return nil, err
 	}
 	return consulContainer, nil
@@ -132,7 +136,7 @@ func findConsul(consulContainer Container) (*dockerclient.Container, *consulapi.
 	// Find our container
 	consulInstance, err := startInstance(consulContainer)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("findConsul: ", err)
 	}
 	// get its IP
 	// [todo] - handle a blank ip address
@@ -162,7 +166,7 @@ func startInstance(container Container) (*dockerclient.Container, error) {
 	// if we didn't find our container
 	if err != nil {
 		if err.Error() != "Not found" {
-			log.Printf("Error: %s\n", err.Error())
+			log.Printf("Error: startInstance 1: %s\n", err.Error())
 			return nil, err
 		}
 		// figure out its cmd line
@@ -178,6 +182,7 @@ func startInstance(container Container) (*dockerclient.Container, error) {
 		// [todo] - need to support tags at some point, split on the :
 		instance, err = runContainer(container.Name, container.Image, "latest", createConfig, hostConfig)
 		if err != nil {
+			log.Printf("Error: startInstance 2: %s\n", err.Error())
 			return nil, err
 		}
 	}
@@ -192,6 +197,7 @@ func startInstance(container Container) (*dockerclient.Container, error) {
 			log.Println("Waiting for " + container.Name + " container to get IP settings")
 			instance, err = findContainerByName(container.Name, false)
 			if err != nil {
+				log.Printf("Error: startInstance 3: %s\n", err.Error())
 				return nil, err
 			}
 			time.Sleep(time.Second)
