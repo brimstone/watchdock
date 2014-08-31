@@ -20,6 +20,7 @@ var docker *dockerclient.Client
 var consul *consulapi.Client
 var consulInstance *dockerclient.Container
 var consulContainer Container
+var otherConsul stringSlice
 
 // Define a type named "stringSlice" as a slice of strings
 type stringSlice []string
@@ -307,53 +308,9 @@ func cleanImages() {
 	}
 }
 
-func main() {
-	// Function level variables
-	var err error
-	var otherConsul stringSlice
-
-	// parse our cli flags
-	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
-	flag.Var(&otherConsul, "join", "Clients to join")
-	flag.Parse()
-
-	// Init the docker client
-	docker, err = dockerclient.NewClient(*dockerSock)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Here's where we define our consul container
-	// Build our consul cmd line from our options
-	cmd := []string{
-		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
-	}
-	/*
-		for _, x := range otherConsul {
-			cmd = append(cmd, "--join")
-			cmd = append(cmd, x)
-		}
-	*/
-	consulContainer.Cmd = cmd
-	consulContainer.Name = "consul"
-	consulContainer.Image = "brimstone/consul"
-	consulContainer.Ports = make(map[dockerclient.Port][]dockerclient.PortBinding)
-	consulContainer.Ports["8500/tcp"] = []dockerclient.PortBinding{
-		dockerclient.PortBinding{
-			HostIp:   "0.0.0.0",
-			HostPort: "8500",
-		},
-	}
-	consulContainer.Ports["8301/tcp"] = []dockerclient.PortBinding{
-		dockerclient.PortBinding{
-			HostIp:   "0.0.0.0",
-			HostPort: "8301",
-		},
-	}
-	consulContainer.Volumes = make(map[string]struct{})
-	consulContainer.Env = make([]string, 0)
-
+func waitForLeader() string {
 	leader := ""
+	var err error
 	// While we don't have a leader
 	for leader == "" {
 		log.Println("Looking for consul leader")
@@ -393,11 +350,55 @@ func main() {
 	// let the users know we found the leader
 	log.Println("Consul leader is", leader)
 
+	return leader
+}
+
+func main() {
+	// Function level variables
+	var err error
+
+	// parse our cli flags
+	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
+	flag.Var(&otherConsul, "join", "Clients to join")
+	flag.Parse()
+
+	// Init the docker client
+	docker, err = dockerclient.NewClient(*dockerSock)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Here's where we define our consul container
+	// Build our consul cmd line from our options
+	cmd := []string{
+		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
+	}
+	consulContainer.Cmd = cmd
+	consulContainer.Name = "consul"
+	consulContainer.Image = "brimstone/consul"
+	consulContainer.Ports = make(map[dockerclient.Port][]dockerclient.PortBinding)
+	consulContainer.Ports["8500/tcp"] = []dockerclient.PortBinding{
+		dockerclient.PortBinding{
+			HostIp:   "0.0.0.0",
+			HostPort: "8500",
+		},
+	}
+	consulContainer.Ports["8301/tcp"] = []dockerclient.PortBinding{
+		dockerclient.PortBinding{
+			HostIp:   "0.0.0.0",
+			HostPort: "8301",
+		},
+	}
+	consulContainer.Volumes = make(map[string]struct{})
+	consulContainer.Env = make([]string, 0)
+
 	log.Println("Finished enumerating containers, starting watch for docker events.")
 	// Listen to events
 	// [fixme] - docker.StartMonitorEvents(dockerCallback)
 	// Periodically check on our services, forever
 	for {
+		// Wait for our leader
+		waitForLeader()
 		// Gather up all of the containers we should now about
 		containers = *mapKVPairs()
 
