@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/armon/consul-api"
-	//"github.com/davecgh/go-spew/spew"
+	"github.com/davecgh/go-spew/spew"
 	dockerclient "github.com/fsouza/go-dockerclient"
 	"log"
 	"strconv"
@@ -90,6 +90,7 @@ func findContainerByName(name string, running bool) (*dockerclient.Container, er
 	if err != nil {
 		log.Fatal(err)
 	}
+	spew.Dump(runningContainers)
 	for _, c := range runningContainers {
 		// If we find one
 		if c.Names[0] == "/"+name {
