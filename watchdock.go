@@ -369,6 +369,11 @@ func main() {
 			log.Println("Warning: ", err)
 			time.Sleep(time.Second)
 			leader, err = consulStatus.Leader()
+			for _, x := range otherConsul {
+				agent := consul.Agent()
+				agent.Join(x, false)
+			}
+
 		}
 		// Remember when we started waiting for leader election to happen
 		startTime = time.Now()
@@ -388,11 +393,6 @@ func main() {
 
 	// let the users know we found the leader
 	log.Println("Consul leader is", leader)
-
-	for _, x := range otherConsul {
-		agent := consul.Agent()
-		agent.Join(x, false)
-	}
 
 	log.Println("Finished enumerating containers, starting watch for docker events.")
 	// Listen to events
