@@ -417,5 +417,9 @@ func main() {
 		time.Sleep(2 * time.Minute)
 		// make sure our consul container is running
 		consulInstance, consul = findConsul(consulContainer)
+		for _, x := range otherConsul {
+			agent := consul.Agent()
+			agent.Join(x, false)
+		}
 	}
 }
