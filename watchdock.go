@@ -328,10 +328,12 @@ func main() {
 	cmd := []string{
 		"--bootstrap-expect", strconv.Itoa(len(otherConsul) + 1),
 	}
-	for _, x := range otherConsul {
-		cmd = append(cmd, "--join")
-		cmd = append(cmd, x)
-	}
+	/*
+		for _, x := range otherConsul {
+			cmd = append(cmd, "--join")
+			cmd = append(cmd, x)
+		}
+	*/
 	consulContainer.Cmd = cmd
 	consulContainer.Name = "consul"
 	consulContainer.Image = "brimstone/consul"
@@ -386,6 +388,11 @@ func main() {
 
 	// let the users know we found the leader
 	log.Println("Consul leader is", leader)
+
+	for _, x := range otherConsul {
+		agent := consul.Agent()
+		agent.Join(x, false)
+	}
 
 	log.Println("Finished enumerating containers, starting watch for docker events.")
 	// Listen to events
