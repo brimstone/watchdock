@@ -90,7 +90,7 @@ func findContainerByName(name string, running bool) (*dockerclient.Container, er
 	if err != nil {
 		log.Fatal(err)
 	}
-	spew.Dump(runningContainers)
+	//spew.Dump(runningContainers)
 	for _, c := range runningContainers {
 		if len(c.Names) == 0 {
 			continue
