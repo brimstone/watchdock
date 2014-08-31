@@ -369,11 +369,6 @@ func main() {
 			log.Println("Warning: ", err)
 			time.Sleep(time.Second)
 			leader, err = consulStatus.Leader()
-			for _, x := range otherConsul {
-				agent := consul.Agent()
-				agent.Join(x, false)
-			}
-
 		}
 		// Remember when we started waiting for leader election to happen
 		startTime = time.Now()
@@ -382,6 +377,10 @@ func main() {
 			log.Println("No leader and no error, waiting for a valid leader")
 			leader, err = consulStatus.Leader()
 			time.Sleep(2 * time.Second)
+			for _, x := range otherConsul {
+				agent := consul.Agent()
+				agent.Join(x, false)
+			}
 		}
 		// If we still don't have a leader, than we timed out
 		if leader == "" {
