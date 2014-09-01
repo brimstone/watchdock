@@ -334,9 +334,27 @@ func waitForLeader() string {
 			log.Println("No leader and no error, waiting for a valid leader")
 			leader, err = consulStatus.Leader()
 			time.Sleep(2 * time.Second)
+			// check to see if we're joined to all of our known nodes
 			for _, x := range otherConsul {
 				agent := consul.Agent()
-				agent.Join(x, false)
+				// get all of the members of our consul instance
+				members, err := agent.Members(false)
+				if err != nil {
+					log.Fatal(err)
+				}
+				flag := false
+				// loop through them
+				for _, member := range members {
+					// if we're already connected, don't try to reconnect
+					if member.Addr == x {
+						flag = true
+						break
+					}
+				}
+				// since we didn't set off our flag, connect to our instance
+				if !flag {
+					agent.Join(x, false)
+				}
 			}
 		}
 		// If we still don't have a leader, than we timed out
