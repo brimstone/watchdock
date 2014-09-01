@@ -278,7 +278,7 @@ func startContainers(containers map[string]Container) {
 }
 
 func cleanUntaggedContainers() {
-	runningContainers, err := docker.ListContainers(dockerclient.ListContainersOptions{All: false})
+	runningContainers, err := docker.ListContainers(dockerclient.ListContainersOptions{All: true})
 	if err != nil {
 		log.Fatal(err)
 	}
