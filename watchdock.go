@@ -386,6 +386,7 @@ func main() {
 		log.Fatal(err)
 	}
 
+	// TODO Maybe make this its own function?
 	// Here's where we define our consul container
 	// Build our consul cmd line from our options
 	cmd := []string{
@@ -431,7 +432,10 @@ func main() {
 		cleanImages()
 		// start what's not running
 		startContainers(containers)
-		// [todo] - clean up untagged images
+
+		// TODO add what's running to our internal structure
+		// TODO sync what we're running with consul
+
 		// sleep for a bit
 		time.Sleep(2 * time.Minute)
 		// make sure our consul container is running
