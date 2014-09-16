@@ -6,7 +6,7 @@ import (
 	//"github.com/brimstone/watchdock/channel"
 	stringslice "github.com/brimstone/go-stringslice"
 	"github.com/brimstone/watchdock/dir"
-	"time"
+	"github.com/brimstone/watchdock/docker"
 )
 
 /* So here's the idea:
@@ -35,34 +35,36 @@ type Module interface {
 func main() {
 	otherConsul := new(stringslice.StringSlice)
 	// parse our command line args
-	//var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
+	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
 	flag.Var(otherConsul, "join", "Clients to join")
 	dirSeed := flag.String("dir", "", "Directory to store")
 	flag.Parse()
-	
+
 	done := make(chan bool)
 
-	mainChannel = make(chan map[string]interface{})
+	mainChannel := make(chan map[string]interface{})
 
-	var storageModules Module
-	if dirSeed != "" {
-		storageModule, err := dir.New(dirSeed)
+	var storageModule Module
+	if *dirSeed != "" {
+		var err error
+		storageModule, err = dir.New(*dirSeed)
 		if err != nil {
 			log.Println("Error loading module dir")
+		} else {
+			log.Println("Loaded storage module: dir")
 		}
 	}
 	// todo - add consul check here
 
-
-	if storageModule = nil {
-		log.Fatal("No storage module loaded successfully") 
+	if storageModule == nil {
+		log.Fatal("No storage module loaded successfully")
 	}
-	
-	processingModule, err := docker.New(dockerSock)
+
+	processingModule, err := docker.New(*dockerSock)
 	if err != nil {
 		log.Fatal("Error loading module docker")
 	}
-	
+
 	// Start all of our modules
 
 	go storageModule.Sync(mainChannel)
