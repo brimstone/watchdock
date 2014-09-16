@@ -28,51 +28,47 @@ Tell the docker module it's now ok to run concurrently and handle events
 Sleep, forever
 
 */
-type Package interface {
+type Module interface {
 	Sync(chan map[string]interface{})
-}
-
-type Module struct {
-	Channel chan map[string]interface{}
-	Instance Package
 }
 
 func main() {
 	otherConsul := new(stringslice.StringSlice)
-	dirs := new(stringslice.StringSlice)
 	// parse our command line args
 	//var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
 	flag.Var(otherConsul, "join", "Clients to join")
-	flag.Var(dirs, "dir", "Directories to store")
+	dirSeed := flag.String("dir", "", "Directory to store")
 	flag.Parse()
+	
+	done := make(chan bool)
 
-	// todo - Use the following empty channel done := make(chan bool)
+	mainChannel = make(chan map[string]interface{})
 
-	var modules []Module
-	for _, dirSeed := range []string(*dirs) {
-		module := new(Module)
-		var err error
-		module.Channel = make(chan map[string]interface{})
-		module.Instance, err = dir.New(dirSeed)
+	var storageModules Module
+	if dirSeed != "" {
+		storageModule, err := dir.New(dirSeed)
 		if err != nil {
 			log.Println("Error loading module dir")
 		}
-		modules = append(modules, *module)
 	}
+	// todo - add consul check here
 
-	// Start all of our modules
-	for _, module := range modules {
-		go module.Instance.Sync(module.Channel)
+
+	if storageModule = nil {
+		log.Fatal("No storage module loaded successfully") 
 	}
+	
+	processingModule, err := docker.New(dockerSock)
+	if err != nil {
+		log.Fatal("Error loading module docker")
+	}
+	
+	// Start all of our modules
+
+	go storageModule.Sync(mainChannel)
+	go processingModule.Sync(mainChannel)
 
 	log.Println("Startup Finished")
-	for {
-		select {
-		case container := <-containerChannel:
-			log.Println("Main loop knows about", container["name"])
-		case <-time.After(5 * time.Second):
-			//	log.Println("Timeout in main loop")
-		}
-	}
-	// todo - Use the following to wait forever: <-done
+	<-done
+
 }
