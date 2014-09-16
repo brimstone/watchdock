@@ -21,6 +21,9 @@ func (dir *Dir) Init(directory string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := os.Stat(directory); os.IsNotExist(err) {
+		os.Mkdir(directory, 0755)
+	}
 	err = dir.watcher.Add(dir.directory)
 	if err != nil {
 		return err

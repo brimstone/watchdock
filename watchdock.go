@@ -28,25 +28,42 @@ Tell the docker module it's now ok to run concurrently and handle events
 Sleep, forever
 
 */
+type Package interface {
+	Sync(chan map[string]interface{})
+}
+
+type Module struct {
+	Channel chan map[string]interface{}
+	Instance Package
+}
 
 func main() {
 	otherConsul := new(stringslice.StringSlice)
+	dirs := new(stringslice.StringSlice)
 	// parse our command line args
 	//var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
 	flag.Var(otherConsul, "join", "Clients to join")
+	flag.Var(dirs, "dir", "Directories to store")
 	flag.Parse()
 
-	//joins := []string(*otherConsul)
+	// todo - Use the following empty channel done := make(chan bool)
 
-	containerChannel := make(chan map[string]interface{})
-// todo - Use the following empty channel done := make(chan bool)
-
-	module, err := dir.New("/tmp/containers")
-	if err != nil {
-		log.Println("Error loading module dir")
+	var modules []Module
+	for _, dirSeed := range []string(*dirs) {
+		module := new(Module)
+		var err error
+		module.Channel = make(chan map[string]interface{})
+		module.Instance, err = dir.New(dirSeed)
+		if err != nil {
+			log.Println("Error loading module dir")
+		}
+		modules = append(modules, *module)
 	}
 
-	go module.Sync(containerChannel)
+	// Start all of our modules
+	for _, module := range modules {
+		go module.Instance.Sync(module.Channel)
+	}
 
 	log.Println("Startup Finished")
 	for {
@@ -57,5 +74,5 @@ func main() {
 			//	log.Println("Timeout in main loop")
 		}
 	}
-// todo - Use the following to wait forever: <-done
+	// todo - Use the following to wait forever: <-done
 }
