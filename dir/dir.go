@@ -88,6 +88,7 @@ func (dir *Dir) Sync(channel chan map[string]interface{}) {
 
 			if event.Op&fsnotify.Write == fsnotify.Write {
 				obj, err := dir.validate(event.Name)
+				// todo - add a check of modification times to debounce
 				if err == nil {
 					log.Printf("Detected change in %s\n", obj["name"])
 					log.Println(event)
@@ -102,8 +103,21 @@ func (dir *Dir) Sync(channel chan map[string]interface{}) {
 		case err := <-dir.watcher.Errors:
 			log.Println("Dir error:", err)
 		// when we get a new container, write it to disk
-		case file := <-channel:
-			log.Println("Got notification about:", file)
+		case fileMap := <-channel:
+			log.Println("Got notification about:", fileMap)
+			rawJson, err := json.Marshal(fileMap)
+			if err != nil {
+				log.Println("Got an error Marshalling:", err.Error())
+				continue
+			}
+			// todo - log our own write so we don't trigger later
+			fo, err := os.Create("/tmp/containers/blah.json")
+			if err != nil {
+				log.Println("Got an writing:", err.Error())
+				continue
+			}
+			fo.Write(rawJson)
+			fo.Close()
 		}
 	}
 }
