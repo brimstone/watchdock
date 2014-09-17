@@ -93,6 +93,16 @@ func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeCha
 		select {
 		case event := <-readChannel:
 			log.Println("Docker got notification about", event["Name"])
+			if _, ok := event["deleteme"]; ok {
+				log.Println("Killing", event["Name"])
+				container, err := self.findContainerByName("/"+event["Name"].(string), false)
+				if err != nil {
+					log.Println("Couldn't find container named", event["Name"])
+					continue
+				}
+				self.docker.KillContainer(dockerclient.KillContainerOptions{ID: container.ID})
+				continue
+			}
 			self.CheckOn(event)
 		}
 	}
@@ -130,6 +140,7 @@ func (self *Processing) CheckOn(container map[string]interface{}) error {
 
 func (self *Processing) startContainer(container map[string]interface{}) error {
 	log.Println("Starting container", container["Name"])
+	// todo - handle pull first and all of what I've already figured out
 	rawJson, err := json.Marshal(container["Config"])
 	config := new(dockerclient.Config)
 	err = json.Unmarshal(rawJson, &config)

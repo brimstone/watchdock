@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"strings"
 	"time"
 )
@@ -106,10 +107,20 @@ func (dir *Dir) Sync(readChannel <-chan map[string]interface{}, writeChannel cha
 				}
 
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
+				if _, ok := dir.modtime[event.Name]; !ok {
+					log.Println("Not tracking", event.Name)
+					continue
+				}
 				// todo - channel <- channel.File{Filename: event.Name}
 				// This one is easy. Simply figure out the name of the file, sans .json ending
 				// Send a special message with the delete attribute
 				log.Println("Dir should let someone know that this file was removed")
+				obj := make(map[string]interface{})
+				base := path.Base(event.Name)
+				ext := path.Ext(base)
+				obj["Name"] = base[0 : len(base)-len(ext)]
+				obj["deleteme"] = true
+				writeChannel <- obj
 			}
 
 		// Error
