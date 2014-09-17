@@ -107,6 +107,8 @@ func (dir *Dir) Sync(readChannel <-chan map[string]interface{}, writeChannel cha
 
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
 				// todo - channel <- channel.File{Filename: event.Name}
+				// This one is easy. Simply figure out the name of the file, sans .json ending
+				// Send a special message with the delete attribute
 				log.Println("Dir should let someone know that this file was removed")
 			}
 

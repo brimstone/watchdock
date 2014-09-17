@@ -71,6 +71,10 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 				self.sendContainer(channel, container)
 			}
 		case "destroy":
+			// todo - Keep internal mapping of IDs to names
+			// When a container is destroyed, all I'm going to know is the ID.
+			// I need to lookup the name from the ID, and send an event with some special attribute.
+			// This attribute will inform the storage module that it should forget what it knows about the container by this name.
 			log.Println("Docker should send notification about this not existing")
 		default:
 			log.Println("Docker says", event.ID, event.Status)
