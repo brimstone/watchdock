@@ -3,6 +3,7 @@ package docker
 import (
 	"encoding/json"
 	//"github.com/davecgh/go-spew/spew"
+	"errors"
 	dockerclient "github.com/fsouza/go-dockerclient"
 	"log"
 )
@@ -52,9 +53,55 @@ func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeCha
 	for {
 		select {
 		case event := <-readChannel:
-			log.Println("Docker got a message %v", event["Config"])
+			log.Println("Docker got notification about", event["Name"])
+			self.CheckOn(event)
 		}
 	}
+}
+
+func (self *Processing) findContainerByName(name string, running bool) (*dockerclient.Container, error) {
+	runningContainers, err := self.docker.ListContainers(dockerclient.ListContainersOptions{All: !running})
+	if err != nil {
+		log.Fatal(err)
+	}
+	//spew.Dump(runningContainers)
+	for _, c := range runningContainers {
+		if len(c.Names) == 0 {
+			continue
+		}
+		// If we find one
+		if c.Names[0] == name {
+			return self.docker.InspectContainer(c.ID)
+		}
+	}
+	return nil, errors.New("Not found")
+}
+
+func (self *Processing) CheckOn(container map[string]interface{}) error {
+	runningContainer, err := self.findContainerByName(container["Name"].(string), false)
+	if err != nil {
+		log.Println("Couldn't find container")
+		return self.startContainer(container)
+	}
+	log.Println("Found container", runningContainer.ID)
+	return nil
+}
+
+func (self *Processing) startContainer(container map[string]interface{}) error {
+	log.Println("Starting container", container["Name"])
+	rawJson, err := json.Marshal(container["Config"])
+	config := new(dockerclient.Config)
+	err = json.Unmarshal(rawJson, &config)
+	options := dockerclient.CreateContainerOptions{
+		Name:   container["Name"].(string),
+		Config: config,
+	}
+	_, err = self.docker.CreateContainer(options)
+	if err != nil {
+		log.Println("Error starting container", err.Error())
+		return err
+	}
+	return nil
 }
 
 func New(socket string) (*Processing, error) {
