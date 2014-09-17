@@ -21,7 +21,7 @@ func (self *Processing) Init(socket string) error {
 	return nil
 }
 
-func (self *Processing) Sync(channel chan map[string]interface{}) {
+func (self *Processing) scanContainers(channel chan<- map[string]interface{}) error {
 	// Get a list of what's currently running
 	runningContainers, err := self.docker.ListContainers(dockerclient.ListContainersOptions{All: true})
 	if err != nil {
@@ -42,11 +42,17 @@ func (self *Processing) Sync(channel chan map[string]interface{}) {
 		}
 		channel <- *containerObj
 	}
+	return nil
+}
+
+func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeChannel chan<- map[string]interface{}) {
+
+	go self.scanContainers(writeChannel)
 
 	for {
 		select {
-		case event := <-channel:
-			log.Println("Docker got a message %v", event)
+		case event := <-readChannel:
+			log.Println("Docker got a message %v", event["Config"])
 		}
 	}
 }

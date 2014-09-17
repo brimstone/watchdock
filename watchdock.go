@@ -29,7 +29,7 @@ Sleep, forever
 
 */
 type Module interface {
-	Sync(chan map[string]interface{})
+	Sync(<-chan map[string]interface{}, chan<- map[string]interface{})
 }
 
 func main() {
@@ -42,7 +42,8 @@ func main() {
 
 	done := make(chan bool)
 
-	mainChannel := make(chan map[string]interface{})
+	storageChannel := make(chan map[string]interface{})
+	processingChannel := make(chan map[string]interface{})
 
 	var storageModule Module
 	if *dirSeed != "" {
@@ -67,8 +68,8 @@ func main() {
 
 	// Start all of our modules
 
-	go storageModule.Sync(mainChannel)
-	go processingModule.Sync(mainChannel)
+	go storageModule.Sync(storageChannel, processingChannel)
+	go processingModule.Sync(processingChannel, storageChannel)
 
 	log.Println("Startup Finished")
 	<-done
