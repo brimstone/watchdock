@@ -6,12 +6,14 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
+	"time"
 )
 
 type Dir struct {
 	directory string
 	watcher   *fsnotify.Watcher
-	objects   []map[string]interface{}
+	modtime   map[string]time.Time
 }
 
 func (dir *Dir) Init(directory string) error {
@@ -28,7 +30,9 @@ func (dir *Dir) Init(directory string) error {
 	if err != nil {
 		return err
 	}
-	return err
+
+	dir.modtime = make(map[string]time.Time)
+	return nil
 }
 
 func (dir *Dir) validate(filename string) (map[string]interface{}, error) {
@@ -50,7 +54,7 @@ func (dir *Dir) validate(filename string) (map[string]interface{}, error) {
 	return obj, nil
 }
 
-func (dir *Dir) scandir(channel chan map[string]interface{}) error {
+func (dir *Dir) scandir(channel chan<- map[string]interface{}) error {
 	directory, err := os.Open(dir.directory)
 	if err != nil {
 		log.Printf("Error opening %s\n", dir.directory)
@@ -62,22 +66,24 @@ func (dir *Dir) scandir(channel chan map[string]interface{}) error {
 		return err
 	}
 	for _, file := range files {
-		obj, err := dir.validate(dir.directory + "/" + file.Name())
+		filename := dir.directory + "/" + file.Name()
+		obj, err := dir.validate(filename)
 		if err != nil {
 			log.Printf("Found invalid json file: %s\n", file.Name())
 			continue
 		}
 		log.Printf("Found valid json file: %s\n", file.Name())
-		dir.objects = append(dir.objects, obj)
+		stat, _ := os.Stat(filename)
+		dir.modtime[filename] = stat.ModTime()
 		channel <- obj
 	}
 	return nil
 }
 
-func (dir *Dir) Sync(channel chan map[string]interface{}) {
+func (dir *Dir) Sync(readChannel <-chan map[string]interface{}, writeChannel chan<- map[string]interface{}) {
 	defer dir.watcher.Close()
 
-	dir.scandir(channel)
+	go dir.scandir(writeChannel)
 
 	// basically run forever
 	for {
@@ -90,9 +96,14 @@ func (dir *Dir) Sync(channel chan map[string]interface{}) {
 				obj, err := dir.validate(event.Name)
 				// todo - add a check of modification times to debounce
 				if err == nil {
-					log.Printf("Detected change in %s\n", obj["name"])
-					log.Println(event)
-					channel <- obj
+					log.Printf("Detected change in %s\n", obj["Name"])
+					filename := obj["Name"].(string)
+					if time.Now().Before(dir.modtime[filename].Add(time.Second)) {
+						log.Println("stored time:", dir.modtime[filename])
+						continue
+					}
+					dir.modtime[filename] = time.Now()
+					writeChannel <- obj
 				}
 
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
@@ -103,15 +114,17 @@ func (dir *Dir) Sync(channel chan map[string]interface{}) {
 		case err := <-dir.watcher.Errors:
 			log.Println("Dir error:", err)
 		// when we get a new container, write it to disk
-		case fileMap := <-channel:
-			log.Println("Got notification about:", fileMap)
+		case fileMap := <-readChannel:
+			//log.Println("Got notification about:", fileMap)
 			rawJson, err := json.Marshal(fileMap)
 			if err != nil {
 				log.Println("Got an error Marshalling:", err.Error())
 				continue
 			}
 			// todo - log our own write so we don't trigger later
-			fo, err := os.Create("/tmp/containers/blah.json")
+			names := strings.Split(fileMap["Name"].(string), "/")
+			log.Println("Writing to ", names[1])
+			fo, err := os.Create("/tmp/containers/" + names[1] + ".json")
 			if err != nil {
 				log.Println("Got an writing:", err.Error())
 				continue
