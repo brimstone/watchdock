@@ -10,7 +10,21 @@ import (
 
 type Processing struct {
 	docker     *dockerclient.Client
-	containers map[string]bool
+	containers []Container
+}
+
+type Container struct {
+ID string
+name string
+}
+
+func (self *Processing) findInternalContainerByName(name string) (*Container,error) {
+	for i, c := range self.containers {
+	if c.name == name {
+	return c
+	}
+	}
+	return nil, Error.New("container not found")
 }
 
 func (self *Processing) Init(socket string) error {
@@ -20,7 +34,7 @@ func (self *Processing) Init(socket string) error {
 	if err != nil {
 		return err
 	}
-	self.containers = make(map[string]bool)
+	self.containers = new([]Container)
 	return nil
 }
 
