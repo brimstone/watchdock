@@ -2,6 +2,7 @@ package dir
 
 import (
 	"encoding/json"
+	//"github.com/davecgh/go-spew/spew"
 	"gopkg.in/fsnotify.v1"
 	"io/ioutil"
 	"log"
@@ -10,6 +11,10 @@ import (
 	"strings"
 	"time"
 )
+
+func logit(v ...interface{}) {
+	log.Println("Dir:", v)
+}
 
 type Dir struct {
 	directory string
@@ -107,14 +112,15 @@ func (dir *Dir) Sync(readChannel <-chan map[string]interface{}, writeChannel cha
 				}
 
 			} else if event.Op&fsnotify.Remove == fsnotify.Remove {
+				//spew.Dump(dir.modtime)
 				if _, ok := dir.modtime[event.Name]; !ok {
-					log.Println("Not tracking", event.Name)
+					logit("Not tracking", event.Name)
 					continue
 				}
 				// todo - channel <- channel.File{Filename: event.Name}
 				// This one is easy. Simply figure out the name of the file, sans .json ending
 				// Send a special message with the delete attribute
-				log.Println("Dir should let someone know that this file was removed")
+				logit("Dir should let someone know that this file was removed")
 				obj := make(map[string]interface{})
 				base := path.Base(event.Name)
 				ext := path.Ext(base)
@@ -125,23 +131,29 @@ func (dir *Dir) Sync(readChannel <-chan map[string]interface{}, writeChannel cha
 
 		// Error
 		case err := <-dir.watcher.Errors:
-			log.Println("Dir error:", err)
+			logit("Dir error:", err)
 		// when we get a new container, write it to disk
 		case fileMap := <-readChannel:
-			//log.Println("Got notification about:", fileMap)
+			if _, ok := fileMap["deleteme"]; ok {
+				filename := dir.directory + fileMap["Name"].(string) + ".json"
+				logit("Should delete", filename)
+				delete(dir.modtime, filename)
+				os.Remove(filename)
+				continue
+			}
 			rawJson, err := json.Marshal(fileMap)
 			if err != nil {
-				log.Println("Got an error Marshalling:", err.Error())
+				logit("Got an error Marshalling:", err.Error())
 				continue
 			}
 			// todo - log our own write so we don't trigger later
 			names := strings.Split(fileMap["Name"].(string), "/")
-			log.Println("Writing to", names[1])
+			logit("Writing to", names[1])
 			filename := dir.directory + "/" + names[1] + ".json"
 			dir.modtime[filename] = time.Now()
 			fo, err := os.Create(filename)
 			if err != nil {
-				log.Println("Got an writing:", err.Error())
+				logit("Got an writing:", err.Error())
 				continue
 			}
 			fo.Write(rawJson)

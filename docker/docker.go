@@ -146,7 +146,6 @@ func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeCha
 		select {
 		case event := <-readChannel:
 			logit("Got notification about", event["Name"])
-			logit(event)
 			if _, ok := event["deleteme"]; ok {
 				logit("Killing", event["Name"])
 				container, err := self.findContainerByName("/"+event["Name"].(string), false)
