@@ -2,11 +2,15 @@ package docker
 
 import (
 	"encoding/json"
-	//"github.com/davecgh/go-spew/spew"
 	"errors"
+	//"github.com/davecgh/go-spew/spew"
 	dockerclient "github.com/fsouza/go-dockerclient"
 	"log"
 )
+
+func logit(v ...interface{}) {
+	log.Println("Docker:", v)
+}
 
 type Processing struct {
 	docker     *dockerclient.Client
@@ -14,17 +18,30 @@ type Processing struct {
 }
 
 type Container struct {
-ID string
-name string
+	ID   string
+	Name string
 }
 
-func (self *Processing) findInternalContainerByName(name string) (*Container,error) {
-	for i, c := range self.containers {
-	if c.name == name {
-	return c
+func (self *Processing) findInternalContainerByName(name string) (*Container, error) {
+	//spew.Dump(self.containers)
+	for i, _ := range self.containers {
+		c := &self.containers[i]
+		if c.Name == name {
+			return c, nil
+		}
 	}
+	return nil, errors.New("container not found")
+}
+
+func (self *Processing) findInternalContainerByID(ID string) (*Container, error) {
+	//spew.Dump(self.containers)
+	for i, _ := range self.containers {
+		c := &self.containers[i]
+		if c.ID == ID {
+			return c, nil
+		}
 	}
-	return nil, Error.New("container not found")
+	return nil, errors.New("container not found")
 }
 
 func (self *Processing) Init(socket string) error {
@@ -34,7 +51,7 @@ func (self *Processing) Init(socket string) error {
 	if err != nil {
 		return err
 	}
-	self.containers = new([]Container)
+	//self.containers = new([]Container)
 	return nil
 }
 
@@ -59,11 +76,12 @@ func (self *Processing) scanContainers(channel chan<- map[string]interface{}) er
 	}
 	// Send all of the valid containers back to the storage module
 	for _, c := range runningContainers {
-		log.Println("Found already running container", c.Names[0])
+		logit("Found already running container", c.Names[0])
 		container, err := self.docker.InspectContainer(c.ID)
 		if err != nil {
 			log.Fatal(err)
 		}
+		self.containers = append(self.containers, Container{Name: c.Names[0], ID: c.ID})
 		self.sendContainer(channel, container)
 	}
 	return nil
@@ -80,8 +98,9 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 			if err != nil {
 				log.Fatal(err)
 			}
-			if !self.containers[container.Name] {
-				self.containers[container.Name] = true
+			if _, ok := self.findInternalContainerByName(container.Name); ok != nil {
+				c := Container{Name: container.Name, ID: event.ID}
+				self.containers = append(self.containers, c)
 				self.sendContainer(channel, container)
 			}
 		case "destroy":
@@ -89,9 +108,29 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 			// When a container is destroyed, all I'm going to know is the ID.
 			// I need to lookup the name from the ID, and send an event with some special attribute.
 			// This attribute will inform the storage module that it should forget what it knows about the container by this name.
-			log.Println("Docker should send notification about this not existing")
+			container, err := self.findInternalContainerByID(event.ID)
+			if err != nil {
+				continue
+			}
+			logit("Sending notification about this not existing")
+			obj := make(map[string]interface{})
+			obj["Name"] = container.Name
+			obj["deleteme"] = true
+			for i, c := range self.containers {
+				if c.ID == event.ID {
+					if i == 0 {
+						self.containers = self.containers[1:]
+					} else if i == len(self.containers) {
+						self.containers = self.containers[0 : len(self.containers)-1]
+					} else {
+						self.containers = append(self.containers[:i], self.containers[i+1:]...)
+					}
+				}
+			}
+			channel <- obj
+
 		default:
-			log.Println("Docker says", event.ID, event.Status)
+			logit("Docker says", event.ID, event.Status)
 		}
 	}
 }
@@ -102,16 +141,17 @@ func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeCha
 
 	go self.listenToDocker(writeChannel)
 
-	log.Println("Docker listening for events from storage module")
+	logit("Listening for events from storage module")
 	for {
 		select {
 		case event := <-readChannel:
-			log.Println("Docker got notification about", event["Name"])
+			logit("Got notification about", event["Name"])
+			logit(event)
 			if _, ok := event["deleteme"]; ok {
-				log.Println("Killing", event["Name"])
+				logit("Killing", event["Name"])
 				container, err := self.findContainerByName("/"+event["Name"].(string), false)
 				if err != nil {
-					log.Println("Couldn't find container named", event["Name"])
+					logit("Couldn't find container named", event["Name"])
 					continue
 				}
 				self.docker.KillContainer(dockerclient.KillContainerOptions{ID: container.ID})
@@ -144,16 +184,16 @@ func (self *Processing) CheckOn(container map[string]interface{}) error {
 	name := container["Name"].(string)
 	_, err := self.findContainerByName(name, false)
 	if err != nil {
-		log.Println("Couldn't find container", name)
+		logit("Couldn't find container", name)
 		return self.startContainer(container)
 	}
 	// todo - actually check the config
-	log.Println("Container", name, "is already running")
+	logit("Container", name, "is already running")
 	return nil
 }
 
 func (self *Processing) startContainer(container map[string]interface{}) error {
-	log.Println("Starting container", container["Name"])
+	logit("Starting container", container["Name"])
 	// todo - handle pull first and all of what I've already figured out
 	rawJson, err := json.Marshal(container["Config"])
 	config := new(dockerclient.Config)
@@ -164,12 +204,16 @@ func (self *Processing) startContainer(container map[string]interface{}) error {
 		Config: config,
 	}
 	// remember this name for later
-	self.containers[name] = true
-	_, err = self.docker.CreateContainer(options)
+	self.containers = append(self.containers, Container{Name: name})
+	containerObj, err := self.docker.CreateContainer(options)
 	if err != nil {
-		log.Println("Error starting container", err.Error())
+		logit("Error starting container", err.Error())
 		return err
 	}
+	// todo - This doesn't pass back in a reference properly
+	c, _ := self.findInternalContainerByName(name)
+	c.ID = containerObj.ID
+	//spew.Dump(self.containers)
 	return nil
 }
 
