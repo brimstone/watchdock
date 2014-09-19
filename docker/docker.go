@@ -6,6 +6,8 @@ import (
 	//"github.com/davecgh/go-spew/spew"
 	dockerclient "github.com/fsouza/go-dockerclient"
 	"log"
+	"strings"
+	"time"
 )
 
 func logit(v ...interface{}) {
@@ -18,12 +20,12 @@ type Processing struct {
 }
 
 type Container struct {
-	ID   string
-	Name string
+	ID    string
+	Name  string
+	Image string
 }
 
 func (self *Processing) findInternalContainerByName(name string) (*Container, error) {
-	//spew.Dump(self.containers)
 	for i, _ := range self.containers {
 		c := &self.containers[i]
 		if c.Name == name {
@@ -34,7 +36,6 @@ func (self *Processing) findInternalContainerByName(name string) (*Container, er
 }
 
 func (self *Processing) findInternalContainerByID(ID string) (*Container, error) {
-	//spew.Dump(self.containers)
 	for i, _ := range self.containers {
 		c := &self.containers[i]
 		if c.ID == ID {
@@ -81,7 +82,7 @@ func (self *Processing) scanContainers(channel chan<- map[string]interface{}) er
 		if err != nil {
 			log.Fatal(err)
 		}
-		self.containers = append(self.containers, Container{Name: c.Names[0], ID: c.ID})
+		self.containers = append(self.containers, Container{Name: c.Names[0], ID: c.ID, Image: c.Image})
 		self.sendContainer(channel, container)
 	}
 	return nil
@@ -104,7 +105,6 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 				self.sendContainer(channel, container)
 			}
 		case "destroy":
-			// todo - Keep internal mapping of IDs to names
 			// When a container is destroyed, all I'm going to know is the ID.
 			// I need to lookup the name from the ID, and send an event with some special attribute.
 			// This attribute will inform the storage module that it should forget what it knows about the container by this name.
@@ -157,6 +157,8 @@ func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeCha
 				continue
 			}
 			self.CheckOn(event)
+		case <-time.After(5 * time.Second):
+			self.pullAllImages()
 		}
 	}
 }
@@ -166,7 +168,6 @@ func (self *Processing) findContainerByName(name string, running bool) (*dockerc
 	if err != nil {
 		log.Fatal(err)
 	}
-	//spew.Dump(runningContainers)
 	for _, c := range runningContainers {
 		if len(c.Names) == 0 {
 			continue
@@ -191,9 +192,29 @@ func (self *Processing) CheckOn(container map[string]interface{}) error {
 	return nil
 }
 
+func (self *Processing) pullImage(imageName string) error {
+	log.Printf("Pulling %s\n", imageName)
+	image := strings.Split(imageName, ":")
+	if len(image) == 1 {
+		image[1] = "latest"
+	}
+	err := self.docker.PullImage(dockerclient.PullImageOptions{Repository: image[0], Tag: image[1]}, dockerclient.AuthConfiguration{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (self *Processing) pullAllImages() {
+	for _, c := range self.containers {
+		go self.pullImage(c.Image)
+	}
+}
+
 func (self *Processing) startContainer(container map[string]interface{}) error {
 	logit("Starting container", container["Name"])
 	// todo - handle pull first and all of what I've already figured out
+	self.pullImage(container["Image"].(string))
 	rawJson, err := json.Marshal(container["Config"])
 	config := new(dockerclient.Config)
 	err = json.Unmarshal(rawJson, &config)
@@ -203,16 +224,14 @@ func (self *Processing) startContainer(container map[string]interface{}) error {
 		Config: config,
 	}
 	// remember this name for later
-	self.containers = append(self.containers, Container{Name: name})
+	self.containers = append(self.containers, Container{Name: name, Image: container["Image"].(string)})
 	containerObj, err := self.docker.CreateContainer(options)
 	if err != nil {
 		logit("Error starting container", err.Error())
 		return err
 	}
-	// todo - This doesn't pass back in a reference properly
 	c, _ := self.findInternalContainerByName(name)
 	c.ID = containerObj.ID
-	//spew.Dump(self.containers)
 	return nil
 }
 
