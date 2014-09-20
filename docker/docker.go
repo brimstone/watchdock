@@ -346,6 +346,7 @@ func (self *Processing) pullAllImages() {
 	logit("Pulling all Images")
 	// Make a temp channel
 	channel := make(chan struct{})
+	channels := 0
 	for image, _ := range self.Images {
 		// run all of our pulls concurrently
 		go func() {
@@ -354,9 +355,10 @@ func (self *Processing) pullAllImages() {
 			// notify our parent when we're done
 			channel <- struct{}{}
 		}()
+		channels++
 	}
 	// wait for all of the images to complete their pull
-	for _, _ = range self.Images {
+	for ; channels > 0; channels-- {
 		<-channel
 	}
 	logit("Finished checking for new images")
