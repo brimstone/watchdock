@@ -1,7 +1,8 @@
 FROM ubuntu:14.04
 
 MAINTAINER brimstone@the.narro.ws
-CMD []
+CMD ["--dir", "/containers"]
+VOLUME /containers
 
 # TORUN -v /var/run/docker.sock:/var/run/docker.sock
 
