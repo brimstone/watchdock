@@ -17,12 +17,16 @@ func logit(v ...interface{}) {
 type Processing struct {
 	docker     *dockerclient.Client
 	containers []Container
+	Images     map[string]string
 }
 
 type Container struct {
-	ID    string
-	Name  string
-	Image string
+	ID         string
+	Name       string
+	Image      string
+	Protect    bool
+	Config     *dockerclient.Config
+	HostConfig *dockerclient.HostConfig
 }
 
 func (self *Processing) findInternalContainerByName(name string) (*Container, error) {
@@ -45,6 +49,33 @@ func (self *Processing) findInternalContainerByID(ID string) (*Container, error)
 	return nil, errors.New("container not found")
 }
 
+func (self *Processing) appendContainer(container Container) {
+	var c *Container
+	var err error
+	c, err = self.findInternalContainerByName(container.Name)
+	if err != nil {
+		logit("Error", err.Error())
+	}
+	if c != nil {
+		if container.ID != "" {
+			c.ID = container.ID
+		}
+		c.Config = container.Config
+		c.HostConfig = container.HostConfig
+		logit("Found container already!", c.Name)
+	} else {
+		logit("Couldn't find existing container to update, adding a new one")
+		for _, c := range self.containers {
+			logit("Container", c.ID, c.Name, c.Image)
+		}
+		logit("New container", container.Name, container.Image)
+		self.containers = append(self.containers, container)
+		if _, ok := self.Images[container.Image]; !ok {
+			self.Images[container.Image] = "fresh"
+		}
+	}
+}
+
 func (self *Processing) Init(socket string) error {
 	var err error
 	// Connect to our docker instance
@@ -53,6 +84,7 @@ func (self *Processing) Init(socket string) error {
 		return err
 	}
 	//self.containers = new([]Container)
+	self.Images = make(map[string]string)
 	return nil
 }
 
@@ -78,12 +110,19 @@ func (self *Processing) scanContainers(channel chan<- map[string]interface{}) er
 	// Send all of the valid containers back to the storage module
 	for _, c := range runningContainers {
 		logit("Found already running container", c.Names[0])
-		container, err := self.docker.InspectContainer(c.ID)
+		fullContainer, err := self.docker.InspectContainer(c.ID)
 		if err != nil {
 			log.Fatal(err)
 		}
-		self.containers = append(self.containers, Container{Name: c.Names[0], ID: c.ID, Image: c.Image})
-		self.sendContainer(channel, container)
+		container := Container{
+			Name:       c.Names[0],
+			ID:         c.ID,
+			Image:      c.Image,
+			Config:     fullContainer.Config,
+			HostConfig: fullContainer.HostConfig,
+		}
+		self.appendContainer(container)
+		self.sendContainer(channel, fullContainer)
 	}
 	return nil
 }
@@ -100,7 +139,12 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 				log.Fatal(err)
 			}
 			if _, ok := self.findInternalContainerByName(container.Name); ok != nil {
-				c := Container{Name: container.Name, ID: event.ID}
+				c := Container{
+					Name:    container.Name,
+					ID:      event.ID,
+					Image:   container.Image,
+					Protect: false,
+				}
 				self.containers = append(self.containers, c)
 				self.sendContainer(channel, container)
 			}
@@ -110,6 +154,9 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 			// This attribute will inform the storage module that it should forget what it knows about the container by this name.
 			container, err := self.findInternalContainerByID(event.ID)
 			if err != nil {
+				continue
+			}
+			if container.Protect {
 				continue
 			}
 			logit("Sending notification about this not existing")
@@ -156,9 +203,85 @@ func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeCha
 				self.docker.KillContainer(dockerclient.KillContainerOptions{ID: container.ID})
 				continue
 			}
-			self.CheckOn(event)
-		case <-time.After(5 * time.Second):
+			rawConfig, err := json.Marshal(event["Config"])
+			config := new(dockerclient.Config)
+			err = json.Unmarshal(rawConfig, &config)
+			if err != nil {
+				logit("Error, bad json passed to us")
+				continue
+			}
+			rawHostConfig, err := json.Marshal(event["HostConfig"])
+			hostConfig := new(dockerclient.HostConfig)
+			err = json.Unmarshal(rawHostConfig, &hostConfig)
+			if err != nil {
+				logit("Error, bad json passed to us")
+				continue
+			}
+
+			c := Container{
+				Name:       event["Name"].(string),
+				Config:     config,
+				HostConfig: hostConfig,
+				Image:      config.Image,
+			}
+			self.appendContainer(c)
+			go self.CheckOn(c)
+		case <-time.After(10 * time.Second):
 			self.pullAllImages()
+			self.CheckOnContainers()
+			self.removeUntaggedImages()
+			self.removeUntaggedContainers()
+			//spew.Dump(self.containers)
+		}
+	}
+}
+
+func (self *Processing) CheckOnContainers() {
+	// todo - this needs to check on any containers,
+	// start them if they're stopped
+	// unset protection flag
+	for i, c := range self.containers {
+		self.CheckOn(c)
+		self.containers[i].Protect = true
+	}
+}
+
+func (self *Processing) removeUntaggedImages() {
+	for i, pulling := range self.Images {
+		if pulling == "pulling" {
+			logit("Currently pulling", i, "so not removing images")
+			return
+		}
+	}
+	images, _ := self.docker.ListImages(false)
+	for _, image := range images {
+		if image.RepoTags[0] == "<none>:<none>" {
+			logit("Removing untagged image", image.ID)
+			self.docker.RemoveImage(image.ID)
+		}
+	}
+}
+
+func (self *Processing) removeUntaggedContainers() {
+	runningContainers, err := self.docker.ListContainers(dockerclient.ListContainersOptions{All: true})
+	if err != nil {
+		logit(err)
+		return
+	}
+	images, err := self.docker.ListImages(false)
+	for _, c := range runningContainers {
+		instance, _ := self.docker.InspectContainer(c.ID)
+		for _, image := range images {
+			if image.ID != instance.Image {
+				continue
+			}
+			if image.RepoTags[0] == "<none>:<none>" {
+				c, _ := self.findInternalContainerByID(c.ID)
+				c.Protect = true
+				logit("Cleaning up old container", instance.ID)
+				self.docker.StopContainer(instance.ID, 0)
+				self.docker.RemoveContainer(dockerclient.RemoveContainerOptions{ID: instance.ID})
+			}
 		}
 	}
 }
@@ -180,25 +303,41 @@ func (self *Processing) findContainerByName(name string, running bool) (*dockerc
 	return nil, errors.New("Not found")
 }
 
-func (self *Processing) CheckOn(container map[string]interface{}) error {
-	name := container["Name"].(string)
-	_, err := self.findContainerByName(name, false)
+func (self *Processing) CheckOn(container Container) error {
+	name := container.Name
+	c, err := self.findContainerByName(name, false)
 	if err != nil {
 		logit("Couldn't find container", name)
 		return self.startContainer(container)
 	}
-	// todo - actually check the config
-	logit("Container", name, "is already running")
+	if c.State.Running {
+		// todo - actually check the config
+		logit("Container", name, "is already running")
+		return nil
+	}
+	logit("Container", name, "is not running, need to start it")
+	err = self.docker.StartContainer(c.ID, c.HostConfig)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
 func (self *Processing) pullImage(imageName string) error {
-	log.Printf("Pulling %s\n", imageName)
+	if imageName == "" {
+		log.Fatal("I can't pull nothing. You've got something wrong")
+	}
 	image := strings.Split(imageName, ":")
 	if len(image) == 1 {
-		image[1] = "latest"
+		image = append(image, "latest")
 	}
+	if self.Images[image[0]] == "pulling" {
+		return errors.New("Already pulling " + imageName)
+	}
+	logit("Pulling", imageName)
+	self.Images[image[0]] = "pulling"
 	err := self.docker.PullImage(dockerclient.PullImageOptions{Repository: image[0], Tag: image[1]}, dockerclient.AuthConfiguration{})
+	self.Images[image[0]] = "idle"
 	if err != nil {
 		return err
 	}
@@ -206,31 +345,47 @@ func (self *Processing) pullImage(imageName string) error {
 }
 
 func (self *Processing) pullAllImages() {
-	for _, c := range self.containers {
-		go self.pullImage(c.Image)
+	logit("Pulling all Images")
+	// Make a temp channel
+	channel := make(chan struct{})
+	for image, _ := range self.Images {
+		// run all of our pulls concurrently
+		go func() {
+			self.pullImage(image)
+			logit("Image", image, "finished pulling")
+			// notify our parent when we're done
+			channel <- struct{}{}
+		}()
 	}
+	// wait for all of the images to complete their pull
+	for _, _ = range self.Images {
+		<-channel
+	}
+	logit("Finished checking for new images")
 }
 
-func (self *Processing) startContainer(container map[string]interface{}) error {
-	logit("Starting container", container["Name"])
-	// todo - handle pull first and all of what I've already figured out
-	self.pullImage(container["Image"].(string))
-	rawJson, err := json.Marshal(container["Config"])
-	config := new(dockerclient.Config)
-	err = json.Unmarshal(rawJson, &config)
-	name := container["Name"].(string)
+func (self *Processing) startContainer(container Container) error {
+	logit("Starting container", container.Name)
+	/*
+	if container.Image == "" {
+			spew.Dump(container)
+		}
+	*/
+	err := self.pullImage(container.Image)
+	if err != nil {
+		logit("Error pulling", container.Name, err.Error())
+	}
 	options := dockerclient.CreateContainerOptions{
-		Name:   name,
-		Config: config,
+		Name:   container.Name,
+		Config: container.Config,
 	}
 	// remember this name for later
-	self.containers = append(self.containers, Container{Name: name, Image: container["Image"].(string)})
 	containerObj, err := self.docker.CreateContainer(options)
 	if err != nil {
 		logit("Error starting container", err.Error())
 		return err
 	}
-	c, _ := self.findInternalContainerByName(name)
+	c, _ := self.findInternalContainerByName(container.Name)
 	c.ID = containerObj.ID
 	return nil
 }
