@@ -213,6 +213,7 @@ func (self *Processing) Sync(readChannel <-chan map[string]interface{}, writeCha
 			rawHostConfig, err := json.Marshal(event["HostConfig"])
 			hostConfig := new(dockerclient.HostConfig)
 			err = json.Unmarshal(rawHostConfig, &hostConfig)
+			//spew.Dump(hostConfig)
 			if err != nil {
 				logit("Error, bad json passed to us")
 				continue
@@ -316,10 +317,7 @@ func (self *Processing) CheckOn(container Container) error {
 		return nil
 	}
 	logit("Container", name, "is not running, need to start it")
-	err = self.docker.StartContainer(c.ID, c.HostConfig)
-	if err != nil {
-		return err
-	}
+	//spew.Dump(container)
 	return nil
 }
 
@@ -367,9 +365,9 @@ func (self *Processing) pullAllImages() {
 func (self *Processing) startContainer(container Container) error {
 	logit("Starting container", container.Name)
 	/*
-	if container.Image == "" {
-			spew.Dump(container)
-		}
+		if container.Image == "" {
+				spew.Dump(container)
+			}
 	*/
 	err := self.pullImage(container.Image)
 	if err != nil {
@@ -387,6 +385,10 @@ func (self *Processing) startContainer(container Container) error {
 	}
 	c, _ := self.findInternalContainerByName(container.Name)
 	c.ID = containerObj.ID
+	err = self.docker.StartContainer(c.ID, container.HostConfig)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
