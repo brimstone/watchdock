@@ -4,7 +4,7 @@ import (
 	"flag"
 	"log"
 	//"github.com/brimstone/watchdock/channel"
-	stringslice "github.com/brimstone/go-stringslice"
+	"github.com/brimstone/watchdock/consul"
 	"github.com/brimstone/watchdock/dir"
 	"github.com/brimstone/watchdock/docker"
 )
@@ -33,10 +33,9 @@ type Module interface {
 }
 
 func main() {
-	otherConsul := new(stringslice.StringSlice)
 	// parse our command line args
 	var dockerSock = flag.String("docker", "unix:///var/run/docker.sock", "Path to docker socket")
-	flag.Var(otherConsul, "join", "Clients to join")
+	consulSeed := flag.String("consul", "", "Connection information for consul")
 	dirSeed := flag.String("dir", "", "Directory to store")
 	flag.Parse()
 
@@ -56,6 +55,15 @@ func main() {
 		}
 	}
 	// todo - add consul check here
+	if *consulSeed != "" {
+		var err error
+		storageModule, err = consul.New(*consulSeed)
+		if err != nil {
+			log.Println("Error loading module consul")
+		} else {
+			log.Println("Loaded storage module: consul")
+		}
+	}
 
 	if storageModule == nil {
 		log.Fatal("No storage module loaded successfully")
