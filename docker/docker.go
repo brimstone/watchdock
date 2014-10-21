@@ -326,8 +326,14 @@ func (self *Processing) pullImage(imageName string) error {
 		log.Fatal("I can't pull nothing. You've got something wrong")
 	}
 	image := strings.Split(imageName, ":")
+	// when we just have "repo"
 	if len(image) == 1 {
 		image = append(image, "latest")
+	}
+	// when we have something like "registry:5000/user/repo:latest"
+	if len(image) == 3 {
+		image[0] = image[0] + ":" + image[1]
+		image = append(image[0:1], image[2])
 	}
 	if self.Images[image[0]] == "pulling" {
 		return errors.New("Already pulling " + imageName)
