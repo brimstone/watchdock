@@ -3,7 +3,7 @@ package docker
 import (
 	"encoding/json"
 	"errors"
-	//"github.com/davecgh/go-spew/spew"
+	"github.com/davecgh/go-spew/spew"
 	dockerclient "github.com/fsouza/go-dockerclient"
 	"log"
 	"strings"
@@ -40,12 +40,16 @@ func (self *Processing) findInternalContainerByName(name string) (*Container, er
 }
 
 func (self *Processing) findInternalContainerByID(ID string) (*Container, error) {
+	logit("Searching for", ID)
 	for i, _ := range self.containers {
 		c := &self.containers[i]
 		if c.ID == ID {
+			logit("Found it")
 			return c, nil
 		}
 	}
+	spew.Dump(self.containers)
+	logit("not found")
 	return nil, errors.New("container not found")
 }
 
@@ -111,6 +115,9 @@ func (self *Processing) scanContainers(channel chan<- map[string]interface{}) er
 	for _, c := range runningContainers {
 		logit("Found already running container", c.Names[0])
 		fullContainer, err := self.docker.InspectContainer(c.ID)
+		if !self.shouldRun(fullContainer) {
+			continue
+		}
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -137,6 +144,10 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 			container, err := self.docker.InspectContainer(event.ID)
 			if err != nil {
 				log.Fatal(err)
+			}
+			if !self.shouldRun(container) {
+				logit("Not monitoring", container.Name)
+				continue
 			}
 			if _, ok := self.findInternalContainerByName(container.Name); ok != nil {
 				c := Container{
@@ -398,6 +409,16 @@ func (self *Processing) startContainer(container Container) error {
 		return err
 	}
 	return nil
+}
+
+func (self *Processing) shouldRun(container *dockerclient.Container) bool {
+	for _, env := range container.Config.Env {
+		envArray := strings.Split(env, "=")
+		if envArray[0] == "WATCHDOCK" {
+			return true
+		}
+	}
+	return false
 }
 
 func New(socket string) (*Processing, error) {
