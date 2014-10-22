@@ -74,9 +74,6 @@ func (self *Processing) appendContainer(container Container) {
 		}
 		logit("New container", container.Name, container.Image)
 		self.containers = append(self.containers, container)
-		if _, ok := self.Images[container.Image]; !ok {
-			self.Images[container.Image] = "fresh"
-		}
 	}
 }
 
@@ -165,9 +162,11 @@ func (self *Processing) listenToDocker(channel chan<- map[string]interface{}) {
 			// This attribute will inform the storage module that it should forget what it knows about the container by this name.
 			container, err := self.findInternalContainerByID(event.ID)
 			if err != nil {
+				logit("Err", err)
 				continue
 			}
 			if container.Protect {
+				logit("This container is protected")
 				continue
 			}
 			logit("Sending notification about this not existing")
@@ -254,7 +253,7 @@ func (self *Processing) CheckOnContainers() {
 	// unset protection flag
 	for i, c := range self.containers {
 		self.CheckOn(c)
-		self.containers[i].Protect = true
+		self.containers[i].Protect = false
 	}
 }
 
@@ -289,6 +288,7 @@ func (self *Processing) removeUntaggedContainers() {
 			}
 			if image.RepoTags[0] == "<none>:<none>" {
 				c, _ := self.findInternalContainerByID(c.ID)
+				// This prevents us from sending the delete command to the storage module in the callback handler
 				c.Protect = true
 				logit("Cleaning up old container", instance.ID)
 				self.docker.StopContainer(instance.ID, 0)
@@ -364,11 +364,25 @@ func (self *Processing) pullAllImages() {
 	// Make a temp channel
 	channel := make(chan struct{})
 	channels := 0
+	self.Images = nil
+	self.Images = make(map[string]string)
+	images, _ := self.docker.ListImages(false)
+	for _, c := range self.containers {
+		for _, image := range images {
+			if image.ID != c.Image {
+				continue
+			}
+			// We need to lookup the "name" of the image from this ID
+			logit("Adding", image.RepoTags[0])
+			if _, ok := self.Images[image.RepoTags[0]]; !ok {
+				self.Images[image.RepoTags[0]] = "fresh"
+			}
+		}
+	}
 	for image, _ := range self.Images {
 		// run all of our pulls concurrently
 		go func() {
 			self.pullImage(image)
-			logit("Image", image, "finished pulling")
 			// notify our parent when we're done
 			channel <- struct{}{}
 		}()
